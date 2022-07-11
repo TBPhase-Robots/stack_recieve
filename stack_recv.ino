@@ -10,6 +10,7 @@
 
 #include <std_msgs/msg/float32.h>
 #include <std_msgs/msg/int64.h>
+#include <geometry_msgs/msg/vector3.h>
 
 #include <Wire.h>           // i2c to connect to IR communication board.
 
@@ -38,7 +39,9 @@ i2c_status_t i2c_status_tx;
 i2c_status_t i2c_status_rx;
 
 rcl_subscription_t subscriber;
+rcl_subscription_t vector_subscriber;
 std_msgs__msg__Float32 msg;
+geometry_msgs__msg__Vector3 vector_msg;
 rclc_support_t support;
 rcl_allocator_t allocator;
 rcl_node_t node;
@@ -82,6 +85,30 @@ void subscription_callback(const void * msgin)
   M5.lcd.drawString(s, 0, 0);
 }
 
+// Implementation example:
+void vector_callback(const void * msgin)
+{
+  // Cast received message to used type
+  const geometry_msgs__msg__Vector3 * msg = (const geometry_msgs__msg__Vector3 *)msgin;
+
+  char s[32];
+
+  // Process message
+  sprintf(s, "Received: %f\0", msg->x);
+
+  M5.lcd.clear();
+  M5.lcd.drawString(s, 0, 0);
+
+  i2c_status_tx.x = msg->x;
+  i2c_status_tx.y = 0;
+  i2c_status_tx.theta = 0;
+  i2c_status_tx.status = 0;
+
+  Wire.beginTransmission(ROBOT_I2C_ADDR);
+  Wire.write( (uint8_t*)&i2c_status_tx, sizeof( i2c_status_tx ));
+  Wire.endTransmission();
+}
+
 void setup() {
   // put your setup code here, to run once:
   
@@ -97,7 +124,7 @@ void setup() {
 
   // M5.lcd.println("\na");
 
-  set_microros_wifi_transports("TP-Link_102C", "35811152", "192.168.0.100", 8888);
+  set_microros_wifi_transports("TP-Link_102C", "35811152", "192.168.0.101", 8888);
 
   //  M5.lcd.println("b");
 
@@ -118,19 +145,29 @@ void setup() {
   //  M5.lcd.println("e");
 
   // create publisher
-  RCCHECK(rclc_subscription_init_best_effort(
-    &subscriber,
-    &node,
-    ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32),
-    "topic_name"));
+  // RCCHECK(rclc_subscription_init_best_effort(
+  //   &subscriber,
+  //   &node,
+  //   ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32),
+  //   "topic_name"));
 
-  msg.data = 0;
+  RCCHECK(rclc_subscription_init_best_effort(
+    &vector_subscriber,
+    &node,
+    ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Vector3),
+    "vectors"));
+
+  // msg.data = 0;
 
   RCCHECK(rclc_executor_init(&executor, &support.context, 1, &allocator));
 
+  // RCCHECK(rclc_executor_add_subscription(
+  //   &executor, &subscriber, &msg,
+  //   &subscription_callback, ON_NEW_DATA));
+
   RCCHECK(rclc_executor_add_subscription(
-    &executor, &subscriber, &msg,
-    &subscription_callback, ON_NEW_DATA));
+    &executor, &vector_subscriber, &vector_msg,
+    &vector_callback, ON_NEW_DATA));
 
   // M5.lcd.println("\ndone");
 }
@@ -141,22 +178,12 @@ void loop() {
 
 
   // Send an update down to the robot
-  
-  i2c_status_tx.x = 987;
-  i2c_status_tx.y = 654;
-  i2c_status_tx.theta = 6.28;
-  i2c_status_tx.status++;
-  
-  Wire.beginTransmission(ROBOT_I2C_ADDR);
-  Wire.write( (uint8_t*)&i2c_status_tx, sizeof( i2c_status_tx ));
-  Wire.endTransmission();
-
 
   // Read values back from the robot.
-  Serial.println("Read: ");
-  Wire.requestFrom( ROBOT_I2C_ADDR, sizeof( i2c_status_rx ));
-  Wire.readBytes( (uint8_t*)&i2c_status_rx, sizeof( i2c_status_rx ));
-  printRXStatus();
+  // Serial.println("Read: ");
+  // Wire.requestFrom( ROBOT_I2C_ADDR, sizeof( i2c_status_rx ));
+  // Wire.readBytes( (uint8_t*)&i2c_status_rx, sizeof( i2c_status_rx ));
+  // printRXStatus();
 
   // RCSOFTCHECK(rcl_publish(&subscriber, &msg, NULL));
   // msg.data++;
@@ -166,7 +193,7 @@ void loop() {
   RCCHECK(rclc_executor_spin_some(&executor, RCL_MS_TO_NS(100)));
   
 
-  delay(100);
+  // delay(100);
 }
 
 void printRXStatus() {
