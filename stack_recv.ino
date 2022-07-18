@@ -116,9 +116,9 @@ void vector_callback(const void * msgin)
   char s[32];
   sprintf(s, "Received: %f\0", msg->x);
 
-  //  Prints message to the screen
-  M5.lcd.clear();
-  M5.lcd.drawString(s, 0, 0);
+  // //  Prints message to the screen
+  // M5.lcd.clear();
+  // M5.lcd.drawString(s, 0, 0);
 
   //  Converts message to i2c_status
   i2c_status_tx.x = msg->x;
@@ -177,7 +177,7 @@ void configure_robot() {
     &register_publisher,
     &node,
     ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Int32),
-    "/register"));
+    "/setup/register"));
   handle_count++;
 
   //  Subscribe to the vector ROS topic, using Vector3 messages
@@ -235,7 +235,7 @@ void setup() {
 
   Serial.println("Connecting to WiFi.");
   //  Connect to micro ROS agent
-  set_microros_wifi_transports("TP-Link_102C", "35811152", "192.168.0.101", 8888);
+  set_microros_wifi_transports("TP-Link_102C", "35811152", "192.168.0.230", 8888);
 
   //  Wait a bit, not sure why this is needed but its in the ROS tutorial
   delay(500);
@@ -256,13 +256,13 @@ void setup() {
     &register_publisher,
     &setup_node,
     ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Int32),
-    "/register"));
+    "/setup/register"));
 
   RCCHECK(rclc_subscription_init_default(
     &id_subscription,
     &setup_node,
     ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Int32),
-    "/ids"));
+    "/setup/ids"));
 
   //  Creates an executor to handle the subscriptions
   RCCHECK(rclc_executor_init(&setup_executor, &support.context, 1, &allocator));
