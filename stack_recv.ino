@@ -14,6 +14,7 @@
 #include <rcutils/strerror.h>
 #include <micro_ros_utilities/type_utilities.h>
 
+#include <std_msgs/msg/bool.h>
 #include <std_msgs/msg/int32.h>
 #include <std_msgs/msg/int64.h>
 #include <geometry_msgs/msg/vector3.h>
@@ -50,6 +51,10 @@ typedef struct i2c_status {
 //  Data sent to and from the 3Pi robot
 i2c_status_t i2c_status_tx;
 i2c_status_t i2c_status_rx;
+
+
+rcl_publisher_t heartbeat_publisher;
+std_msgs__msg__Bool heartbeat_msg;
 
 rcl_subscription_t vector_subscriber;
 geometry_msgs__msg__Vector3 vector_msg;
@@ -180,6 +185,15 @@ void configure_robot() {
     "/setup/register"));
   handle_count++;
 
+  char heartbeat_topic_name[32];
+  sprintf(heartbeat_topic_name, "/robot%d/heartbeat", id);
+  RCCHECK(rclc_publisher_init_best_effort(
+    &heartbeat_publisher,
+    &node,
+    ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Bool),
+    heartbeat_topic_name));
+  handle_count++;
+
   //  Subscribe to the vector ROS topic, using Vector3 messages
   char vector_topic_name[32];
   sprintf(vector_topic_name, "/robot%d/vectors", id);
@@ -290,14 +304,15 @@ void setup() {
 void loop() {
   //  Checks for messages from the subscriptions
   if (!configured) {
-    RCCHECK(rclc_executor_spin_some(&setup_executor, RCL_MS_TO_NS(100)));
+    RCCHECK(rclc_executor_spin_some(&setup_executor, RCL_MS_TO_NS(500)));
     if (id != -1) {
       configure_robot();
       configured = true;
     }
   }
   else {
-    RCCHECK(rclc_executor_spin_some(&executor, RCL_MS_TO_NS(100)));
+    RCCHECK(rclc_executor_spin_some(&executor, RCL_MS_TO_NS(500)));
+    RCCHECK(rcl_publish(&heartbeat_publisher, &heartbeat_msg, NULL));
   }
 
 }
