@@ -127,8 +127,8 @@ void vector_callback(const void * msgin)
 
   //  Converts message to i2c_status
   i2c_status_tx.x = msg->x;
-  i2c_status_tx.y = 0;
-  i2c_status_tx.theta = 0;
+  i2c_status_tx.y = msg->y;
+  i2c_status_tx.theta = msg->z;
   i2c_status_tx.status = 0;
 
   //  Sends i2c_status to the 3Pi
