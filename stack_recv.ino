@@ -14,8 +14,10 @@
 #include <rcutils/strerror.h>
 #include <micro_ros_utilities/type_utilities.h>
 
+#include <std_msgs/msg/bool.h>
 #include <std_msgs/msg/int32.h>
 #include <std_msgs/msg/int64.h>
+#include <std_msgs/msg/color_rgba.h>
 #include <geometry_msgs/msg/vector3.h>
 #include <lifecycle_msgs/msg/state.h>
 #include <lifecycle_msgs/srv/get_state.h>
@@ -26,6 +28,7 @@
 #define RCCHECK(fn) {rcl_ret_t temp_rc = fn; if((temp_rc != RCL_RET_OK)){char message[128];sprintf(message, "Error on line %d with status %d. Aborting.\n", __LINE__, (int)temp_rc);M5.lcd.println(message);error_loop();}}
 #define RCSOFTCHECK(fn) {rcl_ret_t temp_rc = fn; if((temp_rc != RCL_RET_OK)){char message[128];sprintf(message, "Error on line %d with status %d. Continuing.\n", __LINE__, (int)temp_rc);M5.lcd.println(message);}}
 
+#define COLOUR(r, g, b) {((r << 24) & 0xFF000000) | ((g << 16) & 0x00FF0000) | ((b << 8) & 0x0000FF00)}
 
 #define ROBOT_I2C_ADDR  8
 
@@ -51,11 +54,20 @@ typedef struct i2c_status {
 i2c_status_t i2c_status_tx;
 i2c_status_t i2c_status_rx;
 
+
+rcl_publisher_t heartbeat_publisher;
+std_msgs__msg__Bool heartbeat_msg;
+
 rcl_subscription_t vector_subscriber;
 geometry_msgs__msg__Vector3 vector_msg;
 
 rcl_subscription_t marker_subscriber;
 std_msgs__msg__Int64 marker_msg;
+
+rcl_subscription_t colour_subscriber;
+std_msgs__msg__ColorRGBA colour_msg;
+
+u_int32_t colour = WHITE;
 
 // rcl_client_t registration_client;
 // lifecycle_msgs__srv__GetState_Request registration_req;
@@ -75,6 +87,8 @@ rclc_executor_t executor;
 int id = -1;
 bool configured = false;
 
+int64_t marker = 0;
+
 //  Stops and prints an error.
 void error_loop(){
   while(1){
@@ -83,17 +97,17 @@ void error_loop(){
 }
 
 //  Draws a thingy marker to the screen
-void drawMarker(u_int64_t data) {
+void drawMarker(u_int64_t data, uint32_t background) {
   M5.lcd.clear();
 
   int size = HEIGHT / 10;
   int side_inset = (WIDTH - HEIGHT) / 2;
 
-  M5.lcd.fillRect(0, 0, WIDTH, size, WHITE);
-  M5.lcd.fillRect(0, 0, size + side_inset, HEIGHT, WHITE);
+  M5.lcd.fillRect(0, 0, WIDTH, size, background);
+  M5.lcd.fillRect(0, 0, size + side_inset, HEIGHT, background);
 
-  M5.lcd.fillRect(0, HEIGHT - size, WIDTH, size, WHITE);
-  M5.lcd.fillRect(WIDTH - size - side_inset, 0, size + side_inset, HEIGHT, WHITE);
+  M5.lcd.fillRect(0, HEIGHT - size, WIDTH, size, background);
+  M5.lcd.fillRect(WIDTH - size - side_inset, 0, size + side_inset, HEIGHT, background);
 
   for (u_int64_t i = 0; i < 36; i++) {
     bool white = (data & ((u_int64_t)1 << i)) != 0;
@@ -116,14 +130,14 @@ void vector_callback(const void * msgin)
   char s[32];
   sprintf(s, "Received: %f\0", msg->x);
 
-  //  Prints message to the screen
-  M5.lcd.clear();
-  M5.lcd.drawString(s, 0, 0);
+  // //  Prints message to the screen
+  // M5.lcd.clear();
+  // M5.lcd.drawString(s, 0, 0);
 
   //  Converts message to i2c_status
   i2c_status_tx.x = msg->x;
-  i2c_status_tx.y = 0;
-  i2c_status_tx.theta = 0;
+  i2c_status_tx.y = msg->y;
+  i2c_status_tx.theta = msg->z;
   i2c_status_tx.status = 0;
 
   //  Sends i2c_status to the 3Pi
@@ -138,8 +152,10 @@ void marker_callback(const void * msgin)
   //  Cast received message to int
   const std_msgs__msg__Int64 * msg = (const std_msgs__msg__Int64 *)msgin;
 
+  marker = msg->data;
+
   //  Draws the marker to the screen
-  drawMarker(msg->data);
+  drawMarker(marker, colour);
 }
 
 void id_callback(const void * msgin) {
@@ -150,6 +166,20 @@ void id_callback(const void * msgin) {
   char s[32];
   sprintf(s, "Received id: %d", id);
   Serial.println(s);
+  M5.lcd.println(s);
+}
+
+void colour_callback(const void * msgin) {
+  const std_msgs__msg__ColorRGBA * msg = (const std_msgs__msg__ColorRGBA *)msgin;
+
+  uint32_t r = 255 * msg->r;
+  uint32_t g = 255 * msg->g;
+  uint32_t b = 255 * msg->b;
+
+  // colour = COLOUR(r, g, b);
+  colour = M5.lcd.color565(r, g, b);
+
+  drawMarker(marker, colour);
 }
 
 void configure_robot() {
@@ -177,7 +207,16 @@ void configure_robot() {
     &register_publisher,
     &node,
     ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Int32),
-    "/register"));
+    "/setup/register"));
+  handle_count++;
+
+  char heartbeat_topic_name[32];
+  sprintf(heartbeat_topic_name, "/robot%d/heartbeat", id);
+  RCCHECK(rclc_publisher_init_best_effort(
+    &heartbeat_publisher,
+    &node,
+    ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Bool),
+    heartbeat_topic_name));
   handle_count++;
 
   //  Subscribe to the vector ROS topic, using Vector3 messages
@@ -200,6 +239,15 @@ void configure_robot() {
     marker_topic_name));
   handle_count++;
 
+  char colour_topic_name[32];
+  sprintf(colour_topic_name, "/robot%d/colours", id);
+  RCCHECK(rclc_subscription_init_default(
+    &colour_subscriber,
+    &node,
+    ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, ColorRGBA),
+    colour_topic_name));
+  handle_count++;
+
   RCCHECK(rclc_executor_init(&executor, &support.context, handle_count, &allocator));
 
   //  Adds the vector subscription to the executor
@@ -211,6 +259,11 @@ void configure_robot() {
   RCCHECK(rclc_executor_add_subscription(
     &executor, &marker_subscriber, &marker_msg,
     &marker_callback, ON_NEW_DATA));
+  
+  //  Adds the colour subscription to the executor
+  RCCHECK(rclc_executor_add_subscription(
+    &executor, &colour_subscriber, &colour_msg,
+    &colour_callback, ON_NEW_DATA));
 
   delay(500);
 
@@ -235,7 +288,7 @@ void setup() {
 
   Serial.println("Connecting to WiFi.");
   //  Connect to micro ROS agent
-  set_microros_wifi_transports("TP-Link_102C", "35811152", "192.168.0.101", 8888);
+  set_microros_wifi_transports("TP-Link_102C", "35811152", "192.168.0.230", 8888);
 
   //  Wait a bit, not sure why this is needed but its in the ROS tutorial
   delay(500);
@@ -256,13 +309,13 @@ void setup() {
     &register_publisher,
     &setup_node,
     ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Int32),
-    "/register"));
+    "/setup/register"));
 
   RCCHECK(rclc_subscription_init_default(
     &id_subscription,
     &setup_node,
     ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Int32),
-    "/ids"));
+    "/setup/ids"));
 
   //  Creates an executor to handle the subscriptions
   RCCHECK(rclc_executor_init(&setup_executor, &support.context, 1, &allocator));
@@ -290,14 +343,15 @@ void setup() {
 void loop() {
   //  Checks for messages from the subscriptions
   if (!configured) {
-    RCCHECK(rclc_executor_spin_some(&setup_executor, RCL_MS_TO_NS(100)));
+    RCCHECK(rclc_executor_spin_some(&setup_executor, RCL_MS_TO_NS(500)));
     if (id != -1) {
       configure_robot();
       configured = true;
     }
   }
   else {
-    RCCHECK(rclc_executor_spin_some(&executor, RCL_MS_TO_NS(100)));
+    RCCHECK(rclc_executor_spin_some(&executor, RCL_MS_TO_NS(500)));
+    RCCHECK(rcl_publish(&heartbeat_publisher, &heartbeat_msg, NULL));
   }
 
 }
